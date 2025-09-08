@@ -22,49 +22,62 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
   
   const obj = useLoader(OBJLoader, url);
   
-  // Load the OBJ text file to get real vertex order
-  const [objVertexMap, setObjVertexMap] = useState<Map<string, number>>(new Map());
+  // Parse OBJ file and create custom attribute mapping
+  const [objData, setObjData] = useState<{ vertices: THREE.Vector3[], faces: number[] } | null>(null);
   
   React.useEffect(() => {
-    // Load the OBJ file as text to parse vertex coordinates
+    // Load the OBJ file as text to parse vertices and faces
     fetch(url)
       .then(response => response.text())
       .then(objText => {
-        const vertexMap = new Map<string, number>();
         const lines = objText.split('\n');
-        let vertexIndex = 0;
+        const vertices: THREE.Vector3[] = [];
+        const faces: number[] = [];
         
         for (const line of lines) {
           if (line.startsWith('v ')) {
+            // Parse vertex
             const parts = line.split(/\s+/);
             if (parts.length >= 4) {
               const x = parseFloat(parts[1]);
               const y = parseFloat(parts[2]);
               const z = parseFloat(parts[3]);
-              
-              // Debug first few vertices
-              if (vertexIndex < 3) {
-                console.log(`OBJ vertex ${vertexIndex}: (${x.toFixed(8)}, ${y.toFixed(8)}, ${z.toFixed(8)})`);
-              }
-              
-              // Store only highest precision to avoid collisions
-              const coordKey = `${x.toFixed(8)},${y.toFixed(8)},${z.toFixed(8)}`;
-              vertexMap.set(coordKey, vertexIndex);
-              vertexIndex++;
+              vertices.push(new THREE.Vector3(x, y, z));
+            }
+          } else if (line.startsWith('f ')) {
+            // Parse face (convert to 0-based indices)
+            const parts = line.split(/\s+/).slice(1); // Remove 'f'
+            const faceVertices: number[] = [];
+            
+            for (const part of parts) {
+              const vertexIndex = parseInt(part.split('/')[0]) - 1; // Convert to 0-based
+              faceVertices.push(vertexIndex);
+            }
+            
+            // Triangulate the face (assuming it's at least a triangle)
+            for (let i = 1; i < faceVertices.length - 1; i++) {
+              faces.push(faceVertices[0]);
+              faces.push(faceVertices[i]);
+              faces.push(faceVertices[i + 1]);
             }
           }
         }
         
-        console.log('Loaded OBJ vertices:', vertexIndex, 'total coordinate keys:', vertexMap.size);
-        setObjVertexMap(vertexMap);
+        console.log(`Parsed OBJ: ${vertices.length} vertices, ${faces.length / 3} triangles`);
+        setObjData({ vertices, faces });
       })
       .catch(error => {
-        console.error('Failed to load OBJ file for vertex mapping:', error);
+        console.error('Failed to parse OBJ file:', error);
       });
   }, [url]);
   
-  // Get the first mesh
+  // Create mesh with custom attribute containing original OBJ vertex indices
   const mainMesh = React.useMemo(() => {
+    if (!objData) {
+      console.log('OBJ data not ready yet');
+      return null;
+    }
+    
     let firstMesh: THREE.Mesh | null = null;
     
     obj.traverse((child) => {
@@ -73,55 +86,65 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
       }
     });
     
-    console.log('Found mesh:', !!firstMesh);
-    return firstMesh;
-  }, [obj]);
-  
-  // Create geometry-to-OBJ-index mapping when both mesh and OBJ vertex map are ready
-  const geometryToObjIndex = React.useMemo(() => {
-    console.log('Creating mapping - mesh:', !!mainMesh, 'OBJ vertex map size:', objVertexMap.size);
-    
-    if (!mainMesh || objVertexMap.size === 0) {
-      return new Map<number, number>();
+    if (!firstMesh) {
+      console.log('No mesh found in loaded OBJ');
+      return null;
     }
     
-    const geometry = (mainMesh as any).geometry as THREE.BufferGeometry;
-    const geometryIndexMap = new Map<number, number>();
+    console.log('Found mesh, adding custom attribute');
     
-    if (geometry.attributes.position) {
-      const positionAttribute = geometry.attributes.position;
+    let geometry = (firstMesh as any).geometry.clone() as THREE.BufferGeometry;
+    
+    // Make geometry non-indexed if it's indexed
+    if (geometry.index) {
+      geometry = geometry.toNonIndexed();
+    }
+    
+    // Create custom attribute for original OBJ vertex indices
+    const positionAttribute = geometry.attributes.position;
+    const vertexCount = positionAttribute.count;
+    const originalIndices = new Float32Array(vertexCount);
+    
+    // Map geometry vertices to original OBJ vertex indices using our parsed face data
+    for (let i = 0; i < vertexCount; i++) {
+      const triangleIndex = Math.floor(i / 3);
+      const vertexInTriangle = i % 3;
       
-      for (let i = 0; i < positionAttribute.count; i++) {
-        const vertex = new THREE.Vector3();
-        vertex.fromBufferAttribute(positionAttribute, i);
+      if (triangleIndex < objData.faces.length / 3) {
+        const faceStartIndex = triangleIndex * 3;
+        const originalVertexIndex = objData.faces[faceStartIndex + vertexInTriangle];
+        originalIndices[i] = originalVertexIndex;
         
-        // Try to find matching OBJ vertex with exact precision first, then lower
-        let objIndex: number | undefined = undefined;
-        for (let precision = 8; precision >= 5 && objIndex === undefined; precision--) {
-          const coordKey = `${vertex.x.toFixed(precision)},${vertex.y.toFixed(precision)},${vertex.z.toFixed(precision)}`;
-          objIndex = objVertexMap.get(coordKey);
-        }
-        
-        if (objIndex !== undefined) {
-          geometryIndexMap.set(i, objIndex);
-          // Debug first few mappings
-          if (geometryIndexMap.size <= 3) {
-            console.log(`Geometry index ${i} -> OBJ index ${objIndex} (${vertex.x.toFixed(8)}, ${vertex.y.toFixed(8)}, ${vertex.z.toFixed(8)})`);
-          }
+        // Debug first few mappings
+        if (i < 9) {
+          console.log(`Geometry vertex ${i} -> OBJ vertex ${originalVertexIndex}`);
         }
       }
-      
-      console.log('Created mapping for', geometryIndexMap.size, 'vertices out of', positionAttribute.count, 'geometry vertices');
     }
     
-    return geometryIndexMap;
-  }, [mainMesh, objVertexMap]);
+    // Add the custom attribute to geometry
+    geometry.setAttribute('originalIndex', new THREE.BufferAttribute(originalIndices, 1));
+    
+    console.log(`Added originalIndex attribute with ${vertexCount} vertices`);
+    
+    // Create new mesh with modified geometry
+    const newMesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshLambertMaterial({ 
+        color: 0xcccccc, 
+        transparent: true, 
+        opacity: 0.9 
+      })
+    );
+    
+    return newMesh;
+  }, [obj, objData]);
   
 
   // Handle vertex selection
   const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    console.log('Click event fired!');
+    console.log('Click event fired!', { mainMesh: !!mainMesh, objData: !!objData });
     
     if (!meshRef.current || !mainMesh) {
       console.log('Missing refs:', { meshRef: !!meshRef.current, mainMesh: !!mainMesh });
@@ -138,9 +161,9 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
       const faceIndex = intersect.faceIndex;
       
       if (faceIndex !== undefined && faceIndex !== null) {
-        const geometry = mainMesh.geometry;
-        const positionAttribute = geometry.attributes.position;
-        const indexAttribute = geometry.index;
+        const clickGeometry = (mainMesh as any).geometry as THREE.BufferGeometry;
+        const positionAttribute = clickGeometry.attributes.position;
+        const indexAttribute = clickGeometry.index;
         
         // Get the three vertices of the intersected face
         let faceVertexIndices: number[] = [];
@@ -178,25 +201,32 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
           }
         }
         
-        // Get the real OBJ index using the geometry-to-OBJ mapping
-        const realObjIndex = geometryToObjIndex.get(closestGeometryIndex);
+        // Get the original OBJ index from the custom attribute
+        const originalIndexAttribute = clickGeometry.attributes.originalIndex;
+        
+        let realObjIndex = closestGeometryIndex; // fallback
+        if (originalIndexAttribute) {
+          realObjIndex = originalIndexAttribute.getX(closestGeometryIndex);
+        }
         
         console.log(`Click: geometry index ${closestGeometryIndex} -> OBJ index ${realObjIndex}`);
         
         onVertexSelect({
-          index: realObjIndex ?? closestGeometryIndex, // Use mapped index or fallback to geometry index
+          index: realObjIndex,
           position: closestWorldPosition
         });
       }
     }
-  }, [camera, raycaster, pointer, onVertexSelect, mainMesh, geometryToObjIndex]);
+  }, [camera, raycaster, pointer, onVertexSelect, mainMesh, objData]);
 
   if (!mainMesh) {
-    console.log('Mesh not ready:', { mainMesh: !!mainMesh, objVertexMapSize: objVertexMap.size });
+    console.log('Mesh not ready:', { mainMesh: !!mainMesh, objDataReady: !!objData });
     return <group />; // Return empty group if mesh not ready
   }
   
-  console.log('Rendering mesh with', mainMesh.geometry.attributes.position.count, 'vertices, mapping size:', geometryToObjIndex.size);
+  const geometry = (mainMesh as any).geometry as THREE.BufferGeometry;
+  console.log('Rendering mesh with', geometry.attributes.position.count, 'vertices');
+  console.log('Has originalIndex attribute:', !!geometry.attributes.originalIndex);
 
   return (
     <group>
@@ -208,7 +238,7 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
       />
       
       {/* Wireframe overlay - non-interactive */}
-      <mesh geometry={mainMesh.geometry} position={mainMesh.position}>
+      <mesh geometry={(mainMesh as any).geometry} position={(mainMesh as any).position}>
         <meshBasicMaterial color={0x333333} wireframe={true} transparent={true} opacity={0.3} />
       </mesh>
       
