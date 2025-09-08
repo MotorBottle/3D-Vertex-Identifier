@@ -14,9 +14,10 @@ interface OBJMeshProps {
   onVertexSelect: (vertex: SelectedVertex | null) => void;
   selectedVertices: SelectedVertex[];
   pointSize: number;
+  onBoundingBoxReady?: (boundingBox: THREE.Box3) => void;
 }
 
-function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshProps) {
+function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize, onBoundingBoxReady }: OBJMeshProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const { camera, raycaster, pointer } = useThree();
   
@@ -27,7 +28,7 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
   const obj = useLoader(OBJLoader, url);
   
   // Parse OBJ file and create custom attribute mapping
-  const [objData, setObjData] = useState<{ vertices: THREE.Vector3[], faces: number[] } | null>(null);
+  const [objData, setObjData] = useState<{ vertices: THREE.Vector3[], faces: number[], boundingBox: THREE.Box3, center: THREE.Vector3 } | null>(null);
   
   React.useEffect(() => {
     // Load the OBJ file as text to parse vertices and faces
@@ -67,8 +68,22 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
           }
         }
         
+        // Calculate bounding box and center
+        const boundingBox = new THREE.Box3();
+        for (const vertex of vertices) {
+          boundingBox.expandByPoint(vertex);
+        }
+        
+        const center = boundingBox.getCenter(new THREE.Vector3());
+        
         console.log(`Parsed OBJ: ${vertices.length} vertices, ${faces.length / 3} triangles`);
-        setObjData({ vertices, faces });
+        console.log('Bounding box:', boundingBox);
+        console.log('Center:', center);
+        
+        setObjData({ vertices, faces, boundingBox, center });
+        
+        // Notify parent component about bounding box
+        onBoundingBoxReady?.(boundingBox);
       })
       .catch(error => {
         console.error('Failed to parse OBJ file:', error);
@@ -140,6 +155,11 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
         opacity: 0.9 
       })
     );
+    
+    // Center the mesh at origin
+    if (objData.center) {
+      newMesh.position.set(-objData.center.x, -objData.center.y, -objData.center.z);
+    }
     
     return newMesh;
   }, [obj, objData]);
@@ -327,6 +347,49 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
   );
 }
 
+// Component to handle automatic camera positioning
+function AutoCameraPosition({ boundingBox }: { boundingBox: THREE.Box3 | null }) {
+  const { camera, controls } = useThree();
+  
+  React.useEffect(() => {
+    if (!boundingBox || !controls) return;
+    
+    const size = boundingBox.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    
+    // Calculate optimal camera distance
+    const fov = camera instanceof THREE.PerspectiveCamera ? camera.fov : 50;
+    const distance = maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(fov / 2))) * 1.5;
+    
+    // Position camera at a nice angle
+    const cameraPosition = new THREE.Vector3(distance, distance, distance);
+    
+    camera.position.copy(cameraPosition);
+    camera.lookAt(0, 0, 0);
+    
+    // Update controls target to center
+    if ('target' in controls) {
+      (controls as any).target.set(0, 0, 0);
+    }
+    
+    // Update camera and controls
+    camera.updateProjectionMatrix();
+    if ('update' in controls) {
+      (controls as any).update();
+    }
+    
+    console.log('Auto-positioned camera:', {
+      objectSize: size,
+      maxDim,
+      distance,
+      cameraPosition: cameraPosition.toArray()
+    });
+    
+  }, [boundingBox, camera, controls]);
+  
+  return null;
+}
+
 interface OBJViewerProps {
   objUrl: string;
   onSelectedVerticesChange?: (vertices: SelectedVertex[]) => void;
@@ -335,6 +398,11 @@ interface OBJViewerProps {
 
 export default function OBJViewer({ objUrl, onSelectedVerticesChange, pointSize = 0.01 }: OBJViewerProps) {
   const [selectedVertices, setSelectedVertices] = useState<SelectedVertex[]>([]);
+  const [boundingBox, setBoundingBox] = useState<THREE.Box3 | null>(null);
+  
+  const handleBoundingBoxReady = useCallback((box: THREE.Box3) => {
+    setBoundingBox(box);
+  }, []);
   
   const handleVertexSelect = useCallback((vertex: SelectedVertex | null) => {
     if (vertex) {
@@ -389,11 +457,13 @@ export default function OBJViewer({ objUrl, onSelectedVerticesChange, pointSize 
           enableZoom 
           enableRotate 
         />
+        <AutoCameraPosition boundingBox={boundingBox} />
         <OBJMesh 
           url={objUrl} 
           onVertexSelect={handleVertexSelect}
           selectedVertices={selectedVertices}
           pointSize={pointSize}
+          onBoundingBoxReady={handleBoundingBoxReady}
         />
       </Canvas>
     </div>
