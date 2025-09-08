@@ -144,10 +144,16 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
   // Handle vertex selection
   const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    console.log('Click event fired!', { mainMesh: !!mainMesh, objData: !!objData });
+    console.log('🖱️  Click event fired!', { 
+      mainMesh: !!mainMesh, 
+      objData: !!objData,
+      meshRefCurrent: !!meshRef.current,
+      eventType: event.type,
+      pointer: pointer.toArray()
+    });
     
     if (!meshRef.current || !mainMesh) {
-      console.log('Missing refs:', { meshRef: !!meshRef.current, mainMesh: !!mainMesh });
+      console.log('❌ Missing refs:', { meshRef: !!meshRef.current, mainMesh: !!mainMesh });
       return;
     }
     
@@ -155,6 +161,7 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
     
     // Raycast against the merged mesh
     const intersects = raycaster.intersectObject(meshRef.current, false);
+    console.log('🎯 Raycast results:', { intersectCount: intersects.length });
     
     if (intersects.length > 0) {
       const intersect = intersects[0];
@@ -230,16 +237,27 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
 
   return (
     <group>
-      {/* Main mesh with click handler */}
-      <primitive 
-        object={mainMesh} 
-        ref={meshRef}
-        onClick={handleClick}
-      />
-      
-      {/* Wireframe overlay - non-interactive */}
-      <mesh geometry={(mainMesh as any).geometry} position={(mainMesh as any).position}>
+      {/* Wireframe overlay - non-interactive, rendered first */}
+      <mesh 
+        geometry={(mainMesh as any).geometry} 
+        position={(mainMesh as any).position}
+        raycast={() => null}
+      >
         <meshBasicMaterial color={0x333333} wireframe={true} transparent={true} opacity={0.3} />
+      </mesh>
+      
+      {/* Main mesh with click handler - using mesh instead of primitive */}
+      <mesh 
+        ref={meshRef}
+        geometry={(mainMesh as any).geometry}
+        position={(mainMesh as any).position}
+        onClick={handleClick}
+      >
+        <meshLambertMaterial 
+          color={0xcccccc} 
+          transparent={true} 
+          opacity={0.9} 
+        />
       </mesh>
       
       {/* Render selected vertices as highlighted points */}
@@ -321,10 +339,16 @@ export default function OBJViewer({ objUrl, onSelectedVerticesChange, pointSize 
       <Canvas
         camera={{ position: [2, 2, 2], fov: 60 }}
         style={{ background: '#f0f0f0', width: '100%', height: '100%' }}
+        onPointerDown={(e) => console.log('📱 Canvas pointer down', e)}
+        onClick={(e) => console.log('📱 Canvas click', e)}
       >
         <ambientLight intensity={0.6} />
         <pointLight position={[10, 10, 10]} />
-        <OrbitControls enablePan enableZoom enableRotate />
+        <OrbitControls 
+          enablePan 
+          enableZoom 
+          enableRotate 
+        />
         <OBJMesh 
           url={objUrl} 
           onVertexSelect={handleVertexSelect}
