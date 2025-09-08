@@ -20,6 +20,10 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
   const meshRef = useRef<THREE.Mesh>(null);
   const { camera, raycaster, pointer } = useThree();
   
+  // Track mouse down position and movement to distinguish clicks from drags
+  const mouseDownPos = useRef<{x: number, y: number} | null>(null);
+  const isDragging = useRef(false);
+  
   const obj = useLoader(OBJLoader, url);
   
   // Parse OBJ file and create custom attribute mapping
@@ -141,9 +145,39 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
   }, [obj, objData]);
   
 
-  // Handle vertex selection
+  // Handle mouse down to start tracking potential drag
+  const handleMouseDown = useCallback((event: ThreeEvent<MouseEvent>) => {
+    mouseDownPos.current = { x: event.clientX, y: event.clientY };
+    isDragging.current = false;
+    console.log('🖱️  Mouse down at:', mouseDownPos.current);
+  }, []);
+
+  // Handle mouse move to detect dragging
+  const handleMouseMove = useCallback((event: ThreeEvent<MouseEvent>) => {
+    if (mouseDownPos.current) {
+      const deltaX = Math.abs(event.clientX - mouseDownPos.current.x);
+      const deltaY = Math.abs(event.clientY - mouseDownPos.current.y);
+      const dragThreshold = 5; // pixels
+      
+      if (deltaX > dragThreshold || deltaY > dragThreshold) {
+        isDragging.current = true;
+        console.log('🖱️  Dragging detected, delta:', { deltaX, deltaY });
+      }
+    }
+  }, []);
+
+  // Handle vertex selection - only if not dragging
   const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
+    
+    // Check if this was a drag operation
+    if (isDragging.current) {
+      console.log('🖱️  Click ignored - was dragging');
+      mouseDownPos.current = null;
+      isDragging.current = false;
+      return;
+    }
+    
     console.log('🖱️  Click event fired!', { 
       mainMesh: !!mainMesh, 
       objData: !!objData,
@@ -224,6 +258,10 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
         });
       }
     }
+    
+    // Reset tracking
+    mouseDownPos.current = null;
+    isDragging.current = false;
   }, [camera, raycaster, pointer, onVertexSelect, mainMesh, objData]);
 
   if (!mainMesh) {
@@ -251,6 +289,8 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshPr
         ref={meshRef}
         geometry={(mainMesh as any).geometry}
         position={(mainMesh as any).position}
+        onPointerDown={handleMouseDown}
+        onPointerMove={handleMouseMove}
         onClick={handleClick}
       >
         <meshLambertMaterial 
