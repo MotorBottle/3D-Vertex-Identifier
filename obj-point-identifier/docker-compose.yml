@@ -1,13 +1,8 @@
-version: '3.8'
-
 services:
   obj-point-identifier:
     build: .
     ports:
       - "4173:4173"
-    volumes:
-      - .:/app
-      - /app/node_modules
     environment:
       - NODE_ENV=production
     
