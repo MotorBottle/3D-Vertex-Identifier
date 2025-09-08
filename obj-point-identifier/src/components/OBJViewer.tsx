@@ -1,0 +1,307 @@
+import React, { useRef, useState, useCallback } from 'react';
+import { Canvas, useLoader, useThree, type ThreeEvent } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import * as THREE from 'three';
+
+interface SelectedVertex {
+  index: number; // 0-based vertex index
+  position: THREE.Vector3;
+}
+
+interface OBJMeshProps {
+  url: string;
+  onVertexSelect: (vertex: SelectedVertex | null) => void;
+  selectedVertices: SelectedVertex[];
+  pointSize: number;
+}
+
+function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize }: OBJMeshProps) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const { camera, raycaster, pointer } = useThree();
+  
+  const obj = useLoader(OBJLoader, url);
+  
+  // Load the OBJ text file to get real vertex order
+  const [objVertexMap, setObjVertexMap] = useState<Map<string, number>>(new Map());
+  
+  React.useEffect(() => {
+    // Load the OBJ file as text to parse vertex coordinates
+    fetch(url)
+      .then(response => response.text())
+      .then(objText => {
+        const vertexMap = new Map<string, number>();
+        const lines = objText.split('\n');
+        let vertexIndex = 0;
+        
+        for (const line of lines) {
+          if (line.startsWith('v ')) {
+            const parts = line.split(/\s+/);
+            if (parts.length >= 4) {
+              const x = parseFloat(parts[1]);
+              const y = parseFloat(parts[2]);
+              const z = parseFloat(parts[3]);
+              
+              // Debug first few vertices
+              if (vertexIndex < 3) {
+                console.log(`OBJ vertex ${vertexIndex}: (${x.toFixed(8)}, ${y.toFixed(8)}, ${z.toFixed(8)})`);
+              }
+              
+              // Store only highest precision to avoid collisions
+              const coordKey = `${x.toFixed(8)},${y.toFixed(8)},${z.toFixed(8)}`;
+              vertexMap.set(coordKey, vertexIndex);
+              vertexIndex++;
+            }
+          }
+        }
+        
+        console.log('Loaded OBJ vertices:', vertexIndex, 'total coordinate keys:', vertexMap.size);
+        setObjVertexMap(vertexMap);
+      })
+      .catch(error => {
+        console.error('Failed to load OBJ file for vertex mapping:', error);
+      });
+  }, [url]);
+  
+  // Get the first mesh
+  const mainMesh = React.useMemo(() => {
+    let firstMesh: THREE.Mesh | null = null;
+    
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh && !firstMesh) {
+        firstMesh = child as THREE.Mesh;
+      }
+    });
+    
+    console.log('Found mesh:', !!firstMesh);
+    return firstMesh;
+  }, [obj]);
+  
+  // Create geometry-to-OBJ-index mapping when both mesh and OBJ vertex map are ready
+  const geometryToObjIndex = React.useMemo(() => {
+    console.log('Creating mapping - mesh:', !!mainMesh, 'OBJ vertex map size:', objVertexMap.size);
+    
+    if (!mainMesh || objVertexMap.size === 0) {
+      return new Map<number, number>();
+    }
+    
+    const geometry = (mainMesh as any).geometry as THREE.BufferGeometry;
+    const geometryIndexMap = new Map<number, number>();
+    
+    if (geometry.attributes.position) {
+      const positionAttribute = geometry.attributes.position;
+      
+      for (let i = 0; i < positionAttribute.count; i++) {
+        const vertex = new THREE.Vector3();
+        vertex.fromBufferAttribute(positionAttribute, i);
+        
+        // Try to find matching OBJ vertex with exact precision first, then lower
+        let objIndex: number | undefined = undefined;
+        for (let precision = 8; precision >= 5 && objIndex === undefined; precision--) {
+          const coordKey = `${vertex.x.toFixed(precision)},${vertex.y.toFixed(precision)},${vertex.z.toFixed(precision)}`;
+          objIndex = objVertexMap.get(coordKey);
+        }
+        
+        if (objIndex !== undefined) {
+          geometryIndexMap.set(i, objIndex);
+          // Debug first few mappings
+          if (geometryIndexMap.size <= 3) {
+            console.log(`Geometry index ${i} -> OBJ index ${objIndex} (${vertex.x.toFixed(8)}, ${vertex.y.toFixed(8)}, ${vertex.z.toFixed(8)})`);
+          }
+        }
+      }
+      
+      console.log('Created mapping for', geometryIndexMap.size, 'vertices out of', positionAttribute.count, 'geometry vertices');
+    }
+    
+    return geometryIndexMap;
+  }, [mainMesh, objVertexMap]);
+  
+
+  // Handle vertex selection
+  const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    console.log('Click event fired!');
+    
+    if (!meshRef.current || !mainMesh) {
+      console.log('Missing refs:', { meshRef: !!meshRef.current, mainMesh: !!mainMesh });
+      return;
+    }
+    
+    raycaster.setFromCamera(pointer, camera);
+    
+    // Raycast against the merged mesh
+    const intersects = raycaster.intersectObject(meshRef.current, false);
+    
+    if (intersects.length > 0) {
+      const intersect = intersects[0];
+      const faceIndex = intersect.faceIndex;
+      
+      if (faceIndex !== undefined && faceIndex !== null) {
+        const geometry = mainMesh.geometry;
+        const positionAttribute = geometry.attributes.position;
+        const indexAttribute = geometry.index;
+        
+        // Get the three vertices of the intersected face
+        let faceVertexIndices: number[] = [];
+        if (indexAttribute) {
+          // Indexed geometry
+          const idx1 = indexAttribute.getX(faceIndex * 3);
+          const idx2 = indexAttribute.getX(faceIndex * 3 + 1);
+          const idx3 = indexAttribute.getX(faceIndex * 3 + 2);
+          faceVertexIndices = [idx1, idx2, idx3];
+        } else {
+          // Non-indexed geometry
+          faceVertexIndices = [faceIndex * 3, faceIndex * 3 + 1, faceIndex * 3 + 2];
+        }
+        
+        // Find the closest vertex to the click point
+        let closestGeometryIndex = faceVertexIndices[0];
+        let closestDistance = Infinity;
+        let closestWorldPosition = new THREE.Vector3();
+        
+        for (const geometryIndex of faceVertexIndices) {
+          if (geometryIndex >= 0 && geometryIndex < positionAttribute.count) {
+            const vertex = new THREE.Vector3();
+            vertex.fromBufferAttribute(positionAttribute, geometryIndex);
+            
+            // Transform to world coordinates
+            const worldVertex = vertex.clone();
+            meshRef.current!.localToWorld(worldVertex);
+            
+            const distance = worldVertex.distanceTo(intersect.point);
+            if (distance < closestDistance) {
+              closestDistance = distance;
+              closestGeometryIndex = geometryIndex;
+              closestWorldPosition = worldVertex;
+            }
+          }
+        }
+        
+        // Get the real OBJ index using the geometry-to-OBJ mapping
+        const realObjIndex = geometryToObjIndex.get(closestGeometryIndex);
+        
+        console.log(`Click: geometry index ${closestGeometryIndex} -> OBJ index ${realObjIndex}`);
+        
+        onVertexSelect({
+          index: realObjIndex ?? closestGeometryIndex, // Use mapped index or fallback to geometry index
+          position: closestWorldPosition
+        });
+      }
+    }
+  }, [camera, raycaster, pointer, onVertexSelect, mainMesh, geometryToObjIndex]);
+
+  if (!mainMesh) {
+    console.log('Mesh not ready:', { mainMesh: !!mainMesh, objVertexMapSize: objVertexMap.size });
+    return <group />; // Return empty group if mesh not ready
+  }
+  
+  console.log('Rendering mesh with', mainMesh.geometry.attributes.position.count, 'vertices, mapping size:', geometryToObjIndex.size);
+
+  return (
+    <group>
+      {/* Main mesh with click handler */}
+      <primitive 
+        object={mainMesh} 
+        ref={meshRef}
+        onClick={handleClick}
+      />
+      
+      {/* Wireframe overlay - non-interactive */}
+      <mesh geometry={mainMesh.geometry} position={mainMesh.position}>
+        <meshBasicMaterial color={0x333333} wireframe={true} transparent={true} opacity={0.3} />
+      </mesh>
+      
+      {/* Render selected vertices as highlighted points */}
+      {selectedVertices.map((vertex) => {
+        // Validate and convert position
+        const pos = vertex.position;
+        if (!pos || isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
+          console.warn('Invalid vertex position for rendering:', pos);
+          return null;
+        }
+        
+        const position = pos instanceof THREE.Vector3 ? 
+          [pos.x, pos.y, pos.z] as [number, number, number] : 
+          [0, 0, 0] as [number, number, number];
+        
+        // Use position-based key to avoid duplicate spheres at same location
+        const posKey = `${pos.x.toFixed(6)}-${pos.y.toFixed(6)}-${pos.z.toFixed(6)}`;
+        
+        return (
+          <mesh key={`vertex-${posKey}`} position={position}>
+            <sphereGeometry args={[pointSize, 12, 12]} />
+            <meshBasicMaterial color="red" />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+interface OBJViewerProps {
+  objUrl: string;
+  onSelectedVerticesChange?: (vertices: SelectedVertex[]) => void;
+  pointSize?: number;
+}
+
+export default function OBJViewer({ objUrl, onSelectedVerticesChange, pointSize = 0.01 }: OBJViewerProps) {
+  const [selectedVertices, setSelectedVertices] = useState<SelectedVertex[]>([]);
+  
+  const handleVertexSelect = useCallback((vertex: SelectedVertex | null) => {
+    if (vertex) {
+      setSelectedVertices(prev => {
+        // Check if vertex is already selected by position similarity (not just index)
+        // Since the same 3D point might have different indices in merged geometry
+        const POSITION_TOLERANCE = 0.0001;
+        const existingVertex = prev.find(v => {
+          const posDiff = v.position.distanceTo(vertex.position);
+          return posDiff < POSITION_TOLERANCE;
+        });
+        
+        let newVertices: SelectedVertex[];
+        
+        if (existingVertex) {
+          // Remove if already selected (deselect by position)
+          newVertices = prev.filter(v => {
+            const posDiff = v.position.distanceTo(vertex.position);
+            return posDiff >= POSITION_TOLERANCE;
+          });
+          console.log(`Deselected vertex at position:`, vertex.position);
+        } else {
+          // Add new selection only if not already present
+          newVertices = [...prev, vertex];
+          console.log(`Selected vertex ${vertex.index} at position:`, vertex.position);
+        }
+        
+        // Schedule parent notification for next tick to avoid setState during render
+        setTimeout(() => {
+          onSelectedVerticesChange?.(newVertices);
+        }, 0);
+        
+        return newVertices;
+      });
+    }
+  }, [onSelectedVerticesChange]);
+
+  // Clear selection function removed as it's not used in current UI
+
+  return (
+    <div className="viewer-container" style={{ width: '100%', height: '100%' }}>
+      <Canvas
+        camera={{ position: [2, 2, 2], fov: 60 }}
+        style={{ background: '#f0f0f0', width: '100%', height: '100%' }}
+      >
+        <ambientLight intensity={0.6} />
+        <pointLight position={[10, 10, 10]} />
+        <OrbitControls enablePan enableZoom enableRotate />
+        <OBJMesh 
+          url={objUrl} 
+          onVertexSelect={handleVertexSelect}
+          selectedVertices={selectedVertices}
+          pointSize={pointSize}
+        />
+      </Canvas>
+    </div>
+  );
+}

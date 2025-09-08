@@ -1,0 +1,1 @@
+I would like to develop a new project with an interactive interface， 目标是导入一个obj文件，文件里是单一物体，obj物体的顶点是有编号的，而我的目标正是找出一些特定顶点的编号。我希望我能够转动查看这个物品，并能够手动选中（同时会高亮）某几个网格顶点，而这时有一个文字显示区域会显示这些顶点的编号。Project needs to be cross-platform and web based better, if possible.
