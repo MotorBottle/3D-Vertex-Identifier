@@ -387,6 +387,46 @@ function AutoCameraPosition({ boundingBox }: { boundingBox: THREE.Box3 | null })
     
   }, [boundingBox, camera, controls]);
   
+  // Force reset when boundingBox is null (new model loading)
+  React.useEffect(() => {
+    if (boundingBox === null && controls) {
+      // Reset to default position while waiting for new model
+      camera.position.set(2, 2, 2);
+      camera.lookAt(0, 0, 0);
+      
+      // Reset OrbitControls internal state
+      if ('target' in controls) {
+        (controls as any).target.set(0, 0, 0);
+      }
+      
+      // Reset zoom/distance state if available
+      if ('object' in controls && 'position' in (controls as any).object) {
+        // For OrbitControls, we need to reset the distance calculation
+        const controlsAny = controls as any;
+        if ('getDistance' in controlsAny) {
+          // Calculate the distance from current camera position to target
+          const distance = camera.position.distanceTo((controlsAny).target);
+          console.log('Current OrbitControls distance:', distance);
+        }
+      }
+      
+      // Force a complete reset
+      if ('reset' in controls) {
+        (controls as any).reset();
+      }
+      
+      // Re-apply our desired position after reset
+      camera.position.set(2, 2, 2);
+      camera.lookAt(0, 0, 0);
+      
+      camera.updateProjectionMatrix();
+      if ('update' in controls) {
+        (controls as any).update();
+      }
+      console.log('Reset camera and controls for new model loading');
+    }
+  }, [boundingBox, camera, controls]);
+  
   return null;
 }
 
@@ -400,6 +440,11 @@ interface OBJViewerProps {
 export default function OBJViewer({ objUrl, selectedVertices: externalSelectedVertices = [], onSelectedVerticesChange, pointSize = 0.01 }: OBJViewerProps) {
   const [selectedVertices, setSelectedVertices] = useState<SelectedVertex[]>([]);
   const [boundingBox, setBoundingBox] = useState<THREE.Box3 | null>(null);
+  
+  // Reset bounding box when URL changes to trigger camera repositioning
+  React.useEffect(() => {
+    setBoundingBox(null);
+  }, [objUrl]);
   
   // Sync internal state with external state
   React.useEffect(() => {
@@ -451,6 +496,7 @@ export default function OBJViewer({ objUrl, selectedVertices: externalSelectedVe
   return (
     <div className="viewer-container" style={{ width: '100%', height: '100%' }}>
       <Canvas
+        key={objUrl} // Force Canvas recreation when URL changes
         camera={{ position: [2, 2, 2], fov: 60 }}
         style={{ background: '#f0f0f0', width: '100%', height: '100%' }}
         onPointerDown={(e) => console.log('📱 Canvas pointer down', e)}
@@ -459,6 +505,7 @@ export default function OBJViewer({ objUrl, selectedVertices: externalSelectedVe
         <ambientLight intensity={0.6} />
         <pointLight position={[10, 10, 10]} />
         <OrbitControls 
+          key={objUrl} // Force recreation when URL changes
           enablePan 
           enableZoom 
           enableRotate 
