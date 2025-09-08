@@ -20,7 +20,13 @@ function App() {
     if (file) {
       const url = URL.createObjectURL(file)
       setObjFile(url)
+      // Clear all selected vertices when loading a new model
+      setSelectedVertices([])
     }
+  }
+
+  const handleClearAll = () => {
+    setSelectedVertices([])
   }
 
   return (
@@ -61,10 +67,29 @@ function App() {
               fontWeight: 'bold',
               color: '#d32f2f',
               lineHeight: '1.4',
-              wordBreak: 'break-all'
+              wordBreak: 'break-all',
+              marginBottom: '10px'
             }}>
               {selectedVertices.map((v, idx) => `V${idx + 1}(${v.index})`).join(', ')}
             </div>
+            <button
+              onClick={handleClearAll}
+              style={{
+                background: '#f44336',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '6px 12px',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.background = '#d32f2f'}
+              onMouseOut={(e) => e.currentTarget.style.background = '#f44336'}
+            >
+              Clear All
+            </button>
           </div>
         )}
         
@@ -143,7 +168,8 @@ function App() {
       {/* Main 3D Viewer */}
       <div style={{ flex: 1, height: '100vh' }}>
         <OBJViewer 
-          objUrl={objFile} 
+          objUrl={objFile}
+          selectedVertices={selectedVertices}
           onSelectedVerticesChange={setSelectedVertices}
           pointSize={pointSize}
         />

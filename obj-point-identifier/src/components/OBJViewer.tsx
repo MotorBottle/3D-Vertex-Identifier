@@ -301,7 +301,7 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize, onBoundingB
         position={(mainMesh as any).position}
         raycast={() => null}
       >
-        <meshBasicMaterial color={0x333333} wireframe={true} transparent={true} opacity={0.3} />
+        <meshBasicMaterial color={0x000000} wireframe={true} transparent={true} opacity={0.5} />
       </mesh>
       
       {/* Main mesh with click handler - using mesh instead of primitive */}
@@ -392,13 +392,19 @@ function AutoCameraPosition({ boundingBox }: { boundingBox: THREE.Box3 | null })
 
 interface OBJViewerProps {
   objUrl: string;
+  selectedVertices?: SelectedVertex[];
   onSelectedVerticesChange?: (vertices: SelectedVertex[]) => void;
   pointSize?: number;
 }
 
-export default function OBJViewer({ objUrl, onSelectedVerticesChange, pointSize = 0.01 }: OBJViewerProps) {
+export default function OBJViewer({ objUrl, selectedVertices: externalSelectedVertices = [], onSelectedVerticesChange, pointSize = 0.01 }: OBJViewerProps) {
   const [selectedVertices, setSelectedVertices] = useState<SelectedVertex[]>([]);
   const [boundingBox, setBoundingBox] = useState<THREE.Box3 | null>(null);
+  
+  // Sync internal state with external state
+  React.useEffect(() => {
+    setSelectedVertices(externalSelectedVertices);
+  }, [externalSelectedVertices]);
   
   const handleBoundingBoxReady = useCallback((box: THREE.Box3) => {
     setBoundingBox(box);
