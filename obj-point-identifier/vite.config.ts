@@ -10,4 +10,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
   },
+  preview: {
+    host: '0.0.0.0',
+    port: 4173,
+    allowedHosts: ['points.sgp.motorbottle.site']
+  }
 })
