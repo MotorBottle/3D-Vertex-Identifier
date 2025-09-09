@@ -12,6 +12,7 @@ import * as THREE from 'three'
 
 function App() {
   const [objFile, setObjFile] = useState<string>('smplx_0060.obj')
+  const [originalFilename, setOriginalFilename] = useState<string>('smplx_0060.obj')
   const [selectedVertices, setSelectedVertices] = useState<SelectedVertex[]>([])
   const [pointSize, setPointSize] = useState<number>(0.01)
 
@@ -20,6 +21,7 @@ function App() {
     if (file) {
       const url = URL.createObjectURL(file)
       setObjFile(url)
+      setOriginalFilename(file.name)
       // Clear all selected vertices when loading a new model
       setSelectedVertices([])
     }
@@ -102,15 +104,16 @@ function App() {
             display: 'block', 
             marginBottom: '8px' 
           }}>
-            Load OBJ File:
+            Load 3D Model:
           </label>
           <input
             type="file"
-            accept=".obj"
+            accept=".obj,.stl,.fbx"
             onChange={handleFileUpload}
             style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
           />
           <p style={{ fontSize: '12px', color: '#666', margin: '8px 0 0 0' }}>
+            Supports: OBJ, STL, FBX files<br/>
             Current: {objFile.includes('smplx') ? 'Sample file' : 'Custom file'}
           </p>
         </div>
@@ -169,6 +172,7 @@ function App() {
       <div style={{ flex: 1, height: '100vh' }}>
         <OBJViewer 
           objUrl={objFile}
+          originalFilename={originalFilename}
           selectedVertices={selectedVertices}
           onSelectedVerticesChange={setSelectedVertices}
           pointSize={pointSize}

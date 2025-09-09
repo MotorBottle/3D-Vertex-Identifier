@@ -2,22 +2,67 @@ import React, { useRef, useState, useCallback } from 'react';
 import { Canvas, useLoader, useThree, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import * as THREE from 'three';
+
+// Helper function to determine file format from URL or filename
+function getFileFormat(url: string, originalFilename?: string): 'obj' | 'stl' | 'fbx' | 'unknown' {
+  // Use original filename if provided (for blob URLs)
+  const sourceToCheck = originalFilename || url;
+  const extension = sourceToCheck.split('.').pop()?.toLowerCase();
+  
+  switch (extension) {
+    case 'obj': return 'obj';
+    case 'stl': return 'stl';
+    case 'fbx': return 'fbx';
+    default: 
+      // Default to obj for sample files or unknown extensions
+      if (sourceToCheck.includes('smplx') || !extension) {
+        return 'obj';
+      }
+      return 'unknown';
+  }
+}
+
+// Custom hook for loading different 3D model formats
+function use3DModelLoader(url: string, originalFilename?: string) {
+  const format = getFileFormat(url, originalFilename);
+  
+  const displayName = originalFilename || url;
+  console.log(`Loading ${format.toUpperCase()} file:`, displayName);
+  
+  // Use the appropriate loader based on file format
+  switch (format) {
+    case 'obj':
+      return useLoader(OBJLoader, url);
+    case 'stl':
+      return useLoader(STLLoader, url);
+    case 'fbx':
+      return useLoader(FBXLoader, url);
+    case 'unknown':
+      console.warn(`Unknown file format for ${displayName}, defaulting to OBJ loader`);
+      return useLoader(OBJLoader, url);
+    default:
+      throw new Error(`Unsupported file format: ${format}`);
+  }
+}
 
 interface SelectedVertex {
   index: number; // 0-based vertex index
   position: THREE.Vector3;
 }
 
-interface OBJMeshProps {
+interface ModelMeshProps {
   url: string;
+  originalFilename?: string;
   onVertexSelect: (vertex: SelectedVertex | null) => void;
   selectedVertices: SelectedVertex[];
   pointSize: number;
   onBoundingBoxReady?: (boundingBox: THREE.Box3) => void;
 }
 
-function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize, onBoundingBoxReady }: OBJMeshProps) {
+function ModelMesh({ url, originalFilename, onVertexSelect, selectedVertices, pointSize, onBoundingBoxReady }: ModelMeshProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const { camera, raycaster, pointer } = useThree();
   
@@ -25,118 +70,180 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize, onBoundingB
   const mouseDownPos = useRef<{x: number, y: number} | null>(null);
   const isDragging = useRef(false);
   
-  const obj = useLoader(OBJLoader, url);
+  const model = use3DModelLoader(url, originalFilename);
+  const fileFormat = getFileFormat(url, originalFilename);
   
-  // Parse OBJ file and create custom attribute mapping
-  const [objData, setObjData] = useState<{ vertices: THREE.Vector3[], faces: number[], boundingBox: THREE.Box3, center: THREE.Vector3 } | null>(null);
+  // Parse model file and create custom attribute mapping
+  const [modelData, setModelData] = useState<{ vertices: THREE.Vector3[], faces: number[], boundingBox: THREE.Box3, center: THREE.Vector3 } | null>(null);
   
   React.useEffect(() => {
-    // Load the OBJ file as text to parse vertices and faces
-    fetch(url)
-      .then(response => response.text())
-      .then(objText => {
-        const lines = objText.split('\n');
-        const vertices: THREE.Vector3[] = [];
-        const faces: number[] = [];
+    if (!model) return;
+    
+    // Extract geometry data from loaded model
+    const extractModelData = () => {
+      const vertices: THREE.Vector3[] = [];
+      const faces: number[] = [];
+      
+      if (fileFormat === 'obj') {
+        // For OBJ files, parse the original text format for accurate vertex indexing
+        fetch(url)
+          .then(response => response.text())
+          .then(objText => {
+            const lines = objText.split('\n');
+            
+            for (const line of lines) {
+              if (line.startsWith('v ')) {
+                // Parse vertex
+                const parts = line.split(/\s+/);
+                if (parts.length >= 4) {
+                  const x = parseFloat(parts[1]);
+                  const y = parseFloat(parts[2]);
+                  const z = parseFloat(parts[3]);
+                  vertices.push(new THREE.Vector3(x, y, z));
+                }
+              } else if (line.startsWith('f ')) {
+                // Parse face (convert to 0-based indices)
+                const parts = line.split(/\s+/).slice(1); // Remove 'f'
+                const faceVertices: number[] = [];
+                
+                for (const part of parts) {
+                  const vertexIndex = parseInt(part.split('/')[0]) - 1; // Convert to 0-based
+                  faceVertices.push(vertexIndex);
+                }
+                
+                // Triangulate the face (assuming it's at least a triangle)
+                for (let i = 1; i < faceVertices.length - 1; i++) {
+                  faces.push(faceVertices[0]);
+                  faces.push(faceVertices[i]);
+                  faces.push(faceVertices[i + 1]);
+                }
+              }
+            }
+            
+            processModelData(vertices, faces);
+          })
+          .catch(error => {
+            console.error('Failed to parse OBJ file:', error);
+          });
+      } else {
+        // For STL/FBX files, extract from Three.js geometry
+        let firstMesh: THREE.Mesh | null = null;
         
-        for (const line of lines) {
-          if (line.startsWith('v ')) {
-            // Parse vertex
-            const parts = line.split(/\s+/);
-            if (parts.length >= 4) {
-              const x = parseFloat(parts[1]);
-              const y = parseFloat(parts[2]);
-              const z = parseFloat(parts[3]);
-              vertices.push(new THREE.Vector3(x, y, z));
+        if (model instanceof THREE.Group) {
+          model.traverse((child) => {
+            if (child instanceof THREE.Mesh && !firstMesh) {
+              firstMesh = child;
             }
-          } else if (line.startsWith('f ')) {
-            // Parse face (convert to 0-based indices)
-            const parts = line.split(/\s+/).slice(1); // Remove 'f'
-            const faceVertices: number[] = [];
-            
-            for (const part of parts) {
-              const vertexIndex = parseInt(part.split('/')[0]) - 1; // Convert to 0-based
-              faceVertices.push(vertexIndex);
-            }
-            
-            // Triangulate the face (assuming it's at least a triangle)
-            for (let i = 1; i < faceVertices.length - 1; i++) {
-              faces.push(faceVertices[0]);
-              faces.push(faceVertices[i]);
-              faces.push(faceVertices[i + 1]);
+          });
+        } else if (model instanceof THREE.Mesh) {
+          firstMesh = model;
+        } else if (model instanceof THREE.BufferGeometry) {
+          // STL loader returns geometry directly
+          const tempMesh = new THREE.Mesh(model);
+          firstMesh = tempMesh;
+        }
+        
+        if (firstMesh && firstMesh.geometry) {
+          const geometry = firstMesh.geometry;
+          const positionAttribute = geometry.attributes.position;
+          
+          // Extract vertices from geometry
+          for (let i = 0; i < positionAttribute.count; i++) {
+            const x = positionAttribute.getX(i);
+            const y = positionAttribute.getY(i);
+            const z = positionAttribute.getZ(i);
+            vertices.push(new THREE.Vector3(x, y, z));
+          }
+          
+          // Generate faces (every 3 vertices form a triangle)
+          for (let i = 0; i < vertices.length; i += 3) {
+            if (i + 2 < vertices.length) {
+              faces.push(i, i + 1, i + 2);
             }
           }
         }
         
-        // Calculate bounding box and center
-        const boundingBox = new THREE.Box3();
-        for (const vertex of vertices) {
-          boundingBox.expandByPoint(vertex);
-        }
-        
-        const center = boundingBox.getCenter(new THREE.Vector3());
-        
-        console.log(`Parsed OBJ: ${vertices.length} vertices, ${faces.length / 3} triangles`);
-        console.log('Bounding box:', boundingBox);
-        console.log('Center:', center);
-        
-        setObjData({ vertices, faces, boundingBox, center });
-        
-        // Notify parent component about bounding box
-        onBoundingBoxReady?.(boundingBox);
-      })
-      .catch(error => {
-        console.error('Failed to parse OBJ file:', error);
-      });
-  }, [url]);
+        processModelData(vertices, faces);
+      }
+    };
+    
+    const processModelData = (vertices: THREE.Vector3[], faces: number[]) => {
+      // Calculate bounding box and center
+      const boundingBox = new THREE.Box3();
+      for (const vertex of vertices) {
+        boundingBox.expandByPoint(vertex);
+      }
+      
+      const center = boundingBox.getCenter(new THREE.Vector3());
+      
+      console.log(`Parsed ${fileFormat.toUpperCase()}: ${vertices.length} vertices, ${faces.length / 3} triangles`);
+      console.log('Bounding box:', boundingBox);
+      console.log('Center:', center);
+      
+      setModelData({ vertices, faces, boundingBox, center });
+      
+      // Notify parent component about bounding box
+      onBoundingBoxReady?.(boundingBox);
+    };
+    
+    extractModelData();
+  }, [url, model, fileFormat, onBoundingBoxReady]);
   
-  // Create mesh with custom attribute containing original OBJ vertex indices
+  // Create mesh with custom attribute containing original vertex indices
   const mainMesh = React.useMemo(() => {
-    if (!objData) {
-      console.log('OBJ data not ready yet');
+    if (!modelData) {
+      console.log('Model data not ready yet');
       return null;
     }
     
     let firstMesh: THREE.Mesh | null = null;
     
-    obj.traverse((child) => {
-      if (child instanceof THREE.Mesh && !firstMesh) {
-        firstMesh = child as THREE.Mesh;
-      }
-    });
+    // Handle different model types
+    if (model instanceof THREE.Group) {
+      model.traverse((child) => {
+        if (child instanceof THREE.Mesh && !firstMesh) {
+          firstMesh = child;
+        }
+      });
+    } else if (model instanceof THREE.Mesh) {
+      firstMesh = model;
+    } else if (model instanceof THREE.BufferGeometry) {
+      // STL loader returns geometry directly
+      firstMesh = new THREE.Mesh(model);
+    }
     
     if (!firstMesh) {
-      console.log('No mesh found in loaded OBJ');
+      console.log('No mesh found in loaded model');
       return null;
     }
     
     console.log('Found mesh, adding custom attribute');
     
-    let geometry = (firstMesh as any).geometry.clone() as THREE.BufferGeometry;
+    let geometry = firstMesh.geometry.clone() as THREE.BufferGeometry;
     
     // Make geometry non-indexed if it's indexed
     if (geometry.index) {
       geometry = geometry.toNonIndexed();
     }
     
-    // Create custom attribute for original OBJ vertex indices
+    // Create custom attribute for original vertex indices
     const positionAttribute = geometry.attributes.position;
     const vertexCount = positionAttribute.count;
     const originalIndices = new Float32Array(vertexCount);
     
-    // Map geometry vertices to original OBJ vertex indices using our parsed face data
+    // Map geometry vertices to original vertex indices using our parsed face data
     for (let i = 0; i < vertexCount; i++) {
       const triangleIndex = Math.floor(i / 3);
       const vertexInTriangle = i % 3;
       
-      if (triangleIndex < objData.faces.length / 3) {
+      if (triangleIndex < modelData.faces.length / 3) {
         const faceStartIndex = triangleIndex * 3;
-        const originalVertexIndex = objData.faces[faceStartIndex + vertexInTriangle];
+        const originalVertexIndex = modelData.faces[faceStartIndex + vertexInTriangle];
         originalIndices[i] = originalVertexIndex;
         
         // Debug first few mappings
         if (i < 9) {
-          console.log(`Geometry vertex ${i} -> OBJ vertex ${originalVertexIndex}`);
+          console.log(`Geometry vertex ${i} -> Original vertex ${originalVertexIndex}`);
         }
       }
     }
@@ -157,12 +264,12 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize, onBoundingB
     );
     
     // Center the mesh at origin
-    if (objData.center) {
-      newMesh.position.set(-objData.center.x, -objData.center.y, -objData.center.z);
+    if (modelData.center) {
+      newMesh.position.set(-modelData.center.x, -modelData.center.y, -modelData.center.z);
     }
     
     return newMesh;
-  }, [obj, objData]);
+  }, [model, modelData]);
   
 
   // Handle mouse down to start tracking potential drag
@@ -200,7 +307,7 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize, onBoundingB
     
     console.log('🖱️  Click event fired!', { 
       mainMesh: !!mainMesh, 
-      objData: !!objData,
+      modelData: !!modelData,
       meshRefCurrent: !!meshRef.current,
       eventType: event.type,
       pointer: pointer.toArray()
@@ -282,10 +389,10 @@ function OBJMesh({ url, onVertexSelect, selectedVertices, pointSize, onBoundingB
     // Reset tracking
     mouseDownPos.current = null;
     isDragging.current = false;
-  }, [camera, raycaster, pointer, onVertexSelect, mainMesh, objData]);
+  }, [camera, raycaster, pointer, onVertexSelect, mainMesh, modelData]);
 
   if (!mainMesh) {
-    console.log('Mesh not ready:', { mainMesh: !!mainMesh, objDataReady: !!objData });
+    console.log('Mesh not ready:', { mainMesh: !!mainMesh, modelDataReady: !!modelData });
     return <group />; // Return empty group if mesh not ready
   }
   
@@ -432,12 +539,13 @@ function AutoCameraPosition({ boundingBox }: { boundingBox: THREE.Box3 | null })
 
 interface OBJViewerProps {
   objUrl: string;
+  originalFilename?: string;
   selectedVertices?: SelectedVertex[];
   onSelectedVerticesChange?: (vertices: SelectedVertex[]) => void;
   pointSize?: number;
 }
 
-export default function OBJViewer({ objUrl, selectedVertices: externalSelectedVertices = [], onSelectedVerticesChange, pointSize = 0.01 }: OBJViewerProps) {
+export default function OBJViewer({ objUrl, originalFilename, selectedVertices: externalSelectedVertices = [], onSelectedVerticesChange, pointSize = 0.01 }: OBJViewerProps) {
   const [selectedVertices, setSelectedVertices] = useState<SelectedVertex[]>([]);
   const [boundingBox, setBoundingBox] = useState<THREE.Box3 | null>(null);
   
@@ -511,8 +619,9 @@ export default function OBJViewer({ objUrl, selectedVertices: externalSelectedVe
           enableRotate 
         />
         <AutoCameraPosition boundingBox={boundingBox} />
-        <OBJMesh 
+        <ModelMesh 
           url={objUrl} 
+          originalFilename={originalFilename}
           onVertexSelect={handleVertexSelect}
           selectedVertices={selectedVertices}
           pointSize={pointSize}
