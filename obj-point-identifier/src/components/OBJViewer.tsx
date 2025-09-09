@@ -408,7 +408,7 @@ function ModelMesh({ url, originalFilename, onVertexSelect, selectedVertices, po
         position={(mainMesh as any).position}
         raycast={() => null}
       >
-        <meshBasicMaterial color={0x000000} wireframe={true} transparent={true} opacity={0.5} />
+        <meshBasicMaterial color={0xffffff} wireframe={true} transparent={true} opacity={0.5} />
       </mesh>
       
       {/* Main mesh with click handler - using mesh instead of primitive */}
