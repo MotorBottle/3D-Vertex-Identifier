@@ -457,16 +457,27 @@ function ModelMesh({ url, originalFilename, onVertexSelect, selectedVertices, po
 // Component to handle automatic camera positioning
 function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Box3 | null, fileFormat?: string }) {
   const { camera, controls } = useThree();
+  const [lastBoundingBox, setLastBoundingBox] = React.useState<THREE.Box3 | null>(null);
   
   // Position camera immediately when boundingBox is available, with or without controls
   React.useEffect(() => {
-    console.log('🔄 AutoCameraPosition triggered:', { boundingBox: !!boundingBox, controls: !!controls });
+    const timestamp = Date.now();
+    console.log(`🔄 [${timestamp}] AutoCameraPosition triggered:`, { boundingBox: !!boundingBox, controls: !!controls });
     if (!boundingBox) {
       console.log('⏳ No boundingBox yet...');
       return;
     }
     
+    // Check if this is the same bounding box to prevent duplicate positioning
+    if (lastBoundingBox && 
+        lastBoundingBox.min.equals(boundingBox.min) && 
+        lastBoundingBox.max.equals(boundingBox.max)) {
+      console.log(`🚫 [${timestamp}] Same bounding box, skipping positioning...`);
+      return;
+    }
+    
     const format = fileFormat?.toLowerCase();
+    console.log(`📐 [${timestamp}] Starting camera positioning for format:`, format);
     
     const size = boundingBox.getSize(new THREE.Vector3());
     const center = boundingBox.getCenter(new THREE.Vector3());
@@ -476,8 +487,8 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
     const fov = camera instanceof THREE.PerspectiveCamera ? camera.fov : 50;
     const baseDist = maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(fov / 2)));
     
-    // Use unified center-based positioning for all formats (STL's approach)
-    const multiplier = 1.3;
+    // Use unified center-based positioning for all formats
+    const multiplier = 1.2;
     
     const distance = baseDist * multiplier;
     
@@ -508,7 +519,7 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
       console.log('⚠️ Controls not available for update');
     }
     
-    console.log('Auto-positioned camera:', {
+    console.log(`📷 [${timestamp}] Auto-positioned camera:`, {
       fileFormat: format || 'unknown',
       objectSize: size,
       center: center.toArray(),
@@ -518,22 +529,50 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
       cameraPosition: cameraPosition.toArray()
     });
     
+    // Remember this bounding box to prevent duplicate positioning
+    setLastBoundingBox(boundingBox.clone());
+    
+    // For OBJ files, force position again after a short delay to prevent OrbitControls override
+    if (format === 'obj') {
+      setTimeout(() => {
+        console.log(`🔄 [${Date.now()}] OBJ delayed reposition check...`);
+        const currentPos = camera.position.clone();
+        const expectedPos = cameraPosition.clone();
+        const distance = currentPos.distanceTo(expectedPos);
+        
+        if (distance > 0.1) {  // Camera was moved from our position
+          console.log(`🚨 [${Date.now()}] OBJ camera was overridden! Restoring position...`);
+          camera.position.copy(cameraPosition);
+          camera.lookAt(center);
+          if (controls && 'target' in controls) {
+            (controls as any).target.copy(center);
+            (controls as any).update();
+          }
+        }
+      }, 100);  // 100ms delay
+    }
+    
   }, [boundingBox, camera, controls]);
   
   // Force reset when boundingBox is null (new model loading)
   React.useEffect(() => {
-    if (boundingBox === null && controls) {
-      // Reset to default position while waiting for new model
-      camera.position.set(2, 2, 2);
-      camera.lookAt(0, 0, 0);
+    if (boundingBox === null) {
+      // Reset state for new model
+      setLastBoundingBox(null);
       
-      // Reset OrbitControls internal state
-      if ('target' in controls) {
-        (controls as any).target.set(0, 0, 0);
+      if (controls) {
+        // Reset to default position while waiting for new model
+        camera.position.set(2, 2, 2);
+        camera.lookAt(0, 0, 0);
+        
+        // Reset OrbitControls internal state
+        if ('target' in controls) {
+          (controls as any).target.set(0, 0, 0);
+        }
       }
       
       // Reset zoom/distance state if available
-      if ('object' in controls && 'position' in (controls as any).object) {
+      if (controls && 'object' in controls && 'position' in (controls as any).object) {
         // For OrbitControls, we need to reset the distance calculation
         const controlsAny = controls as any;
         if ('getDistance' in controlsAny) {
@@ -544,7 +583,7 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
       }
       
       // Force a complete reset
-      if ('reset' in controls) {
+      if (controls && 'reset' in controls) {
         (controls as any).reset();
       }
       
@@ -553,7 +592,7 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
       camera.lookAt(0, 0, 0);
       
       camera.updateProjectionMatrix();
-      if ('update' in controls) {
+      if (controls && 'update' in controls) {
         (controls as any).update();
       }
       console.log('Reset camera and controls for new model loading');
