@@ -455,39 +455,111 @@ function ModelMesh({ url, originalFilename, onVertexSelect, selectedVertices, po
 }
 
 // Component to handle automatic camera positioning
-function AutoCameraPosition({ boundingBox }: { boundingBox: THREE.Box3 | null }) {
+function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Box3 | null, fileFormat?: string }) {
   const { camera, controls } = useThree();
   
+  // Position camera immediately when boundingBox is available, with or without controls
   React.useEffect(() => {
-    if (!boundingBox || !controls) return;
+    console.log('🔄 AutoCameraPosition triggered:', { boundingBox: !!boundingBox, controls: !!controls });
+    if (!boundingBox) {
+      console.log('⏳ No boundingBox yet...');
+      return;
+    }
+    
+    console.log('✅ BoundingBox ready, positioning camera immediately...');
     
     const size = boundingBox.getSize(new THREE.Vector3());
+    const center = boundingBox.getCenter(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     
-    // Calculate optimal camera distance
+    // Calculate optimal camera distance with adaptive multiplier
     const fov = camera instanceof THREE.PerspectiveCamera ? camera.fov : 50;
-    const distance = maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(fov / 2))) * 1.5;
+    const baseDist = maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(fov / 2)));
     
-    // Position camera at a nice angle
-    const cameraPosition = new THREE.Vector3(distance, distance, distance);
+    // Format-specific multiplier for optimal viewing
+    let multiplier = 1.0;
+    const format = fileFormat?.toLowerCase();
+    
+    if (format === 'stl') {
+      multiplier = 1.3;  // STL files - current working logic
+    } else if (format === 'fbx') {
+      multiplier = 1.2;  // FBX files - current working logic
+    } else if (format === 'obj') {
+      // OBJ files - revert to original working scale
+      // Use hardcoded distance positioning relative to origin (old logic)
+      const distance = maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(fov / 2))) * 1.5;
+      const cameraPosition = new THREE.Vector3(distance, distance, distance);
+      
+      camera.position.copy(cameraPosition);
+      camera.lookAt(0, 0, 0);  // Look at origin for OBJ files
+      
+      // Update controls target to origin (old logic)
+      if (controls && 'target' in controls) {
+        (controls as any).target.set(0, 0, 0);
+        console.log('🎯 Updated controls target to origin for OBJ');
+      }
+      
+      camera.updateProjectionMatrix();
+      if (controls && 'update' in controls) {
+        (controls as any).update();
+      }
+      
+      console.log('Auto-positioned camera (OBJ original logic):', {
+        fileFormat: format,
+        objectSize: size,
+        maxDim,
+        multiplier: 1.5,
+        distance,
+        cameraPosition: cameraPosition.toArray()
+      });
+      
+      return; // Exit early for OBJ files
+    } else {
+      // Fallback to size-based for unknown formats
+      if (maxDim > 50) {
+        multiplier = 1.5;
+      } else if (maxDim > 10) {
+        multiplier = 1.2;
+      } else {
+        multiplier = 1.0;
+      }
+    }
+    
+    const distance = baseDist * multiplier;
+    
+    // Position camera at a nice angle relative to the model center
+    const cameraPosition = new THREE.Vector3(
+      center.x + distance, 
+      center.y + distance, 
+      center.z + distance
+    );
     
     camera.position.copy(cameraPosition);
-    camera.lookAt(0, 0, 0);
+    camera.lookAt(center);
     
-    // Update controls target to center
-    if ('target' in controls) {
-      (controls as any).target.set(0, 0, 0);
+    // Update controls target to model center (if controls are available)
+    if (controls && 'target' in controls) {
+      (controls as any).target.copy(center);
+      console.log('🎯 Updated controls target to model center');
+    } else {
+      console.log('⚠️ Controls not available for target update');
     }
     
     // Update camera and controls
     camera.updateProjectionMatrix();
-    if ('update' in controls) {
+    if (controls && 'update' in controls) {
       (controls as any).update();
+      console.log('🔄 Updated controls');
+    } else {
+      console.log('⚠️ Controls not available for update');
     }
     
     console.log('Auto-positioned camera:', {
+      fileFormat: format || 'unknown',
       objectSize: size,
+      center: center.toArray(),
       maxDim,
+      multiplier,
       distance,
       cameraPosition: cameraPosition.toArray()
     });
@@ -618,7 +690,10 @@ export default function OBJViewer({ objUrl, originalFilename, selectedVertices: 
           enableZoom 
           enableRotate 
         />
-        <AutoCameraPosition boundingBox={boundingBox} />
+        <AutoCameraPosition 
+          boundingBox={boundingBox} 
+          fileFormat={getFileFormat(objUrl, originalFilename)}
+        />
         <ModelMesh 
           url={objUrl} 
           originalFilename={originalFilename}
