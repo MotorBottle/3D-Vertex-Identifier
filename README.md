@@ -22,6 +22,9 @@ A web-based 3D model viewer that lets you click on vertices to see their index n
 - Adjust point size for better visibility
 - Clear all selections with one click
 
+<img width="1920" height="966" alt="image" src="https://github.com/user-attachments/assets/a8abfdad-db75-44c5-9672-5310189253db" />
+
+
 ## 快速开始 / Quick Start
 
 ### 使用 Docker（推荐）/ Using Docker (Recommended)
