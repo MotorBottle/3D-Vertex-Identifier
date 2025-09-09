@@ -456,7 +456,8 @@ function ModelMesh({ url, originalFilename, onVertexSelect, selectedVertices, po
 
 // Component to handle automatic camera positioning
 function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Box3 | null, fileFormat?: string }) {
-  const { camera, controls } = useThree();
+  const { camera } = useThree();
+  const controls = useThree((state) => state.controls) as any;
   const [lastBoundingBox, setLastBoundingBox] = React.useState<THREE.Box3 | null>(null);
   
   // Position camera immediately when boundingBox is available, with or without controls
@@ -480,8 +481,10 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
     console.log(`📐 [${timestamp}] Starting camera positioning for format:`, format);
     
     const size = boundingBox.getSize(new THREE.Vector3());
-    const center = boundingBox.getCenter(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
+    
+    // Since we recenter the mesh at origin, use origin for camera target
+    const center = new THREE.Vector3(0, 0, 0);
     
     // Calculate optimal camera distance with adaptive multiplier
     const fov = camera instanceof THREE.PerspectiveCamera ? camera.fov : 50;
@@ -502,21 +505,15 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
     camera.position.copy(cameraPosition);
     camera.lookAt(center);
     
-    // Update controls target to model center (if controls are available)
-    if (controls && 'target' in controls) {
-      (controls as any).target.copy(center);
-      console.log('🎯 Updated controls target to model center');
-    } else {
-      console.log('⚠️ Controls not available for target update');
-    }
-    
     // Update camera and controls
     camera.updateProjectionMatrix();
-    if (controls && 'update' in controls) {
-      (controls as any).update();
-      console.log('🔄 Updated controls');
+    
+    if (controls) {
+      controls.target.copy(center);
+      controls.update();
+      console.log('🎯 Updated controls target and refreshed');
     } else {
-      console.log('⚠️ Controls not available for update');
+      console.log('⚠️ Controls not available');
     }
     
     console.log(`📷 [${timestamp}] Auto-positioned camera:`, {
@@ -531,26 +528,6 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
     
     // Remember this bounding box to prevent duplicate positioning
     setLastBoundingBox(boundingBox.clone());
-    
-    // For OBJ files, force position again after a short delay to prevent OrbitControls override
-    if (format === 'obj') {
-      setTimeout(() => {
-        console.log(`🔄 [${Date.now()}] OBJ delayed reposition check...`);
-        const currentPos = camera.position.clone();
-        const expectedPos = cameraPosition.clone();
-        const distance = currentPos.distanceTo(expectedPos);
-        
-        if (distance > 0.1) {  // Camera was moved from our position
-          console.log(`🚨 [${Date.now()}] OBJ camera was overridden! Restoring position...`);
-          camera.position.copy(cameraPosition);
-          camera.lookAt(center);
-          if (controls && 'target' in controls) {
-            (controls as any).target.copy(center);
-            (controls as any).update();
-          }
-        }
-      }, 100);  // 100ms delay
-    }
     
   }, [boundingBox, camera, controls]);
   
@@ -679,6 +656,7 @@ export default function OBJViewer({ objUrl, originalFilename, selectedVertices: 
         <pointLight position={[10, 10, 10]} />
         <OrbitControls 
           key={objUrl} // Force recreation when URL changes
+          makeDefault
           enablePan 
           enableZoom 
           enableRotate 
