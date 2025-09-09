@@ -276,7 +276,6 @@ function ModelMesh({ url, originalFilename, onVertexSelect, selectedVertices, po
   const handleMouseDown = useCallback((event: ThreeEvent<MouseEvent>) => {
     mouseDownPos.current = { x: event.clientX, y: event.clientY };
     isDragging.current = false;
-    console.log('🖱️  Mouse down at:', mouseDownPos.current);
   }, []);
 
   // Handle mouse move to detect dragging
@@ -288,7 +287,6 @@ function ModelMesh({ url, originalFilename, onVertexSelect, selectedVertices, po
       
       if (deltaX > dragThreshold || deltaY > dragThreshold) {
         isDragging.current = true;
-        console.log('🖱️  Dragging detected, delta:', { deltaX, deltaY });
       }
     }
   }, []);
@@ -299,22 +297,13 @@ function ModelMesh({ url, originalFilename, onVertexSelect, selectedVertices, po
     
     // Check if this was a drag operation
     if (isDragging.current) {
-      console.log('🖱️  Click ignored - was dragging');
       mouseDownPos.current = null;
       isDragging.current = false;
       return;
     }
     
-    console.log('🖱️  Click event fired!', { 
-      mainMesh: !!mainMesh, 
-      modelData: !!modelData,
-      meshRefCurrent: !!meshRef.current,
-      eventType: event.type,
-      pointer: pointer.toArray()
-    });
     
     if (!meshRef.current || !mainMesh) {
-      console.log('❌ Missing refs:', { meshRef: !!meshRef.current, mainMesh: !!mainMesh });
       return;
     }
     
@@ -322,7 +311,6 @@ function ModelMesh({ url, originalFilename, onVertexSelect, selectedVertices, po
     
     // Raycast against the merged mesh
     const intersects = raycaster.intersectObject(meshRef.current, false);
-    console.log('🎯 Raycast results:', { intersectCount: intersects.length });
     
     if (intersects.length > 0) {
       const intersect = intersects[0];
@@ -649,8 +637,6 @@ export default function OBJViewer({ objUrl, originalFilename, selectedVertices: 
         key={objUrl} // Force Canvas recreation when URL changes
         camera={{ position: [2, 2, 2], fov: 60 }}
         style={{ background: '#f0f0f0', width: '100%', height: '100%' }}
-        onPointerDown={(e) => console.log('📱 Canvas pointer down', e)}
-        onClick={(e) => console.log('📱 Canvas click', e)}
       >
         <ambientLight intensity={0.6} />
         <pointLight position={[10, 10, 10]} />
