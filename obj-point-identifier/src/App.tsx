@@ -4,7 +4,7 @@ import './App.css'
 
 interface SelectedVertex {
   index: number;
-  position: { x: number; y: number; z: number } | THREE.Vector3;
+  position: THREE.Vector3;
 }
 
 // Import THREE for Vector3 type
@@ -44,7 +44,7 @@ function App() {
         overflowY: 'auto',
         flexShrink: 0
       }}>
-        <h2 style={{ margin: '0 0 20px 0', color: '#333' }}>OBJ Point Identifier</h2>
+        <h2 style={{ margin: '0 0 20px 0', color: '#333' }}>3D Vertex Identifier</h2>
         
         {/* Selected Points Display */}
         {selectedVertices.length > 0 && (
@@ -165,6 +165,28 @@ function App() {
             <li>Use mouse to rotate, zoom, and pan</li>
             <li>Selected vertex numbers appear above</li>
           </ul>
+        </div>
+        
+        {/* Author Info */}
+        <div style={{
+          padding: '12px',
+          background: '#f5f5f5',
+          border: '1px solid #e0e0e0',
+          borderRadius: '4px',
+          fontSize: '12px',
+          color: '#888',
+          marginTop: '20px',
+          textAlign: 'center'
+        }}>
+          <div style={{ marginBottom: '4px', fontWeight: 'bold', color: '#666' }}>
+            3D Vertex Identifier
+          </div>
+          <div style={{ marginBottom: '4px' }}>
+            Built with React + Three.js
+          </div>
+          <div>
+            Developed by MotorBottle & Claude Code
+          </div>
         </div>
       </div>
       

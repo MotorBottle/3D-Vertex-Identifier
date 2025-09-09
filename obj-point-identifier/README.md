@@ -1,69 +1,86 @@
-# React + TypeScript + Vite
+# 3D Vertex Identifier
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A web-based 3D model viewer that lets you click on vertices to see their index numbers.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Load OBJ, STL, and FBX files
+- Click on any vertex to select it
+- See vertex numbers in real-time
+- Rotate, zoom, and pan around models
+- Adjust point size for better visibility
+- Clear all selections with one click
 
-## Expanding the ESLint configuration
+## Quick Start
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Using Docker (Recommended)
 
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+```bash
+# Clone the repository
+git clone <your-repo-url>
+cd obj-point-identifier
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
+# Run development version
+docker-compose --profile dev up
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Or run production version
+docker-compose up
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The app will be available at:
+- Development: http://localhost:5173
+- Production: http://localhost:4173
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Manual Setup
 
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+npm run preview
 ```
+
+## How to Use
+
+1. **Load a Model**: Click "Choose File" and select an OBJ, STL, or FBX file
+2. **Select Vertices**: Click on any point on the model to select it
+3. **View Numbers**: Selected vertex numbers appear in the left panel
+4. **Navigate**: Use mouse to rotate, zoom, and pan around the model
+5. **Adjust Size**: Use the point size slider to make vertices easier to see
+6. **Clear All**: Click "Clear All" to remove all selections
+
+## File Support
+
+- **OBJ**: Wavefront OBJ files with vertex data
+- **STL**: STereoLithography files (ASCII and binary)
+- **FBX**: Autodesk FBX files
+
+## Deployment
+
+### Static Hosting
+
+After building, the `dist` folder contains all static files that can be deployed to any web server.
+
+### Docker Production
+
+```bash
+docker-compose up
+```
+
+This runs the optimized production build on port 4173.
+
+## Technology
+
+- React + TypeScript
+- Three.js for 3D rendering
+- Vite for building
+- Docker for deployment
+
+## License
+
+MIT
