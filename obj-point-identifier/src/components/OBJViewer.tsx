@@ -466,7 +466,15 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
       return;
     }
     
-    console.log('✅ BoundingBox ready, positioning camera immediately...');
+    const format = fileFormat?.toLowerCase();
+    
+    // For OBJ and FBX files, wait for controls to be ready (old approach)
+    if (format === 'obj' || format === 'fbx') {
+      if (!controls) {
+        console.log('⏳ Controls not ready for OBJ/FBX, waiting...');
+        return;
+      }
+    }
     
     const size = boundingBox.getSize(new THREE.Vector3());
     const center = boundingBox.getCenter(new THREE.Vector3());
@@ -478,12 +486,39 @@ function AutoCameraPosition({ boundingBox, fileFormat }: { boundingBox: THREE.Bo
     
     // Format-specific multiplier for optimal viewing
     let multiplier = 1.0;
-    const format = fileFormat?.toLowerCase();
     
     if (format === 'stl') {
-      multiplier = 1.3;  // STL files - current working logic
+      multiplier = 1.3;  // STL files - immediate positioning
     } else if (format === 'fbx') {
-      multiplier = 1.2;  // FBX files - current working logic
+      // FBX files - revert to original working scale
+      // Use hardcoded distance positioning relative to origin (old logic)
+      const distance = maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(fov / 2))) * 1.5;
+      const cameraPosition = new THREE.Vector3(distance, distance, distance);
+      
+      camera.position.copy(cameraPosition);
+      camera.lookAt(0, 0, 0);  // Look at origin for FBX files
+      
+      // Update controls target to origin (old logic)
+      if (controls && 'target' in controls) {
+        (controls as any).target.set(0, 0, 0);
+        console.log('🎯 Updated controls target to origin for FBX');
+      }
+      
+      camera.updateProjectionMatrix();
+      if (controls && 'update' in controls) {
+        (controls as any).update();
+      }
+      
+      console.log('Auto-positioned camera (FBX original logic):', {
+        fileFormat: format,
+        objectSize: size,
+        maxDim,
+        multiplier: 1.5,
+        distance,
+        cameraPosition: cameraPosition.toArray()
+      });
+      
+      return; // Exit early for FBX files
     } else if (format === 'obj') {
       // OBJ files - revert to original working scale
       // Use hardcoded distance positioning relative to origin (old logic)
